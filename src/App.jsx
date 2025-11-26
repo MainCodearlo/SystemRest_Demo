@@ -3,9 +3,8 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { supabase } from './supabase/client';
 import { Loader2 } from 'lucide-react';
 
-// Layouts y Páginas
 import DashboardLayout from './layouts/DashboardLayout';
-import Login from './pages/Login'; // <--- Importamos el Login
+import Login from './pages/Login';
 import Mesas from './pages/Mesas';
 import Cocina from './pages/Cocina';
 import Barra from './pages/Barra';
@@ -18,13 +17,13 @@ const ProtectedRoute = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // 1. Verificar sesión actual
+    // Verificar sesión inicial
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setLoading(false);
     });
 
-    // 2. Escuchar cambios (login/logout)
+    // Escuchar cambios de sesión
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       setLoading(false);
@@ -33,7 +32,6 @@ const ProtectedRoute = ({ children }) => {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Pantalla de carga mientras verifica si estás logueado
   if (loading) {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-slate-50">
@@ -42,12 +40,10 @@ const ProtectedRoute = ({ children }) => {
     );
   }
 
-  // Si no hay sesión, mandar al login
   if (!session) {
     return <Navigate to="/login" replace />;
   }
 
-  // Si hay sesión, mostrar el contenido (Dashboard)
   return children;
 };
 
@@ -55,11 +51,10 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
-        
-        {/* RUTA PUBLICA: LOGIN */}
+        {/* Ruta pública */}
         <Route path="/login" element={<Login />} />
 
-        {/* RUTAS PROTEGIDAS: EL SISTEMA */}
+        {/* Rutas protegidas */}
         <Route path="/" element={
           <ProtectedRoute>
             <DashboardLayout />
@@ -71,7 +66,6 @@ function App() {
           <Route path="caja" element={<Caja />} />
           <Route path="config" element={<Config />} />
         </Route>
-
       </Routes>
     </BrowserRouter>
   );

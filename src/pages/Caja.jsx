@@ -14,25 +14,14 @@ const Caja = () => {
 
   const fetchDailySales = async () => {
     setLoading(true);
-    // Calcular rango del día actual (00:00 a 23:59)
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
-    // Consultar órdenes pagadas de HOY
-    // NOTA: Asegúrate de tener la relación 'mesas' en tu DB si quieres ver el nombre de la mesa.
-    // Si no tienes la FK configurada, quita el select de mesas y usa solo mesa_id.
     const { data, error } = await supabase
       .from('ordenes')
-      .select(`
-        id,
-        created_at,
-        total,
-        metodo_pago,
-        mesa_id,
-        mesas ( name )
-      `)
+      .select(`id, created_at, total, metodo_pago, mesa_id, mesas ( name )`)
       .eq('estado', 'pagado')
       .gte('created_at', today.toISOString())
       .lt('created_at', tomorrow.toISOString())
@@ -77,8 +66,6 @@ const Caja = () => {
   return (
     <div className="max-w-7xl mx-auto">
       <Header title="Caja y Movimientos" />
-
-      {/* TARJETAS DE RESUMEN */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <StatCard title="Total Día" amount={totals.total} icon={TrendingUp} color="bg-blue-100 text-blue-600" />
         <StatCard title="Efectivo" amount={totals.efectivo} icon={DollarSign} color="bg-green-100 text-green-600" />
@@ -86,7 +73,6 @@ const Caja = () => {
         <StatCard title="Yape / Plin" amount={totals.yape} icon={Smartphone} color="bg-purple-100 text-purple-600" />
       </div>
 
-      {/* TABLA DE TRANSACCIONES */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="p-5 border-b border-slate-100 flex justify-between items-center">
           <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
@@ -108,30 +94,16 @@ const Caja = () => {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
-                <tr>
-                  <td colSpan="5" className="p-8 text-center text-slate-400">
-                    <div className="flex justify-center items-center gap-2"><Loader2 className="animate-spin"/> Cargando movimientos...</div>
-                  </td>
-                </tr>
+                <tr><td colSpan="5" className="p-8 text-center text-slate-400"><div className="flex justify-center items-center gap-2"><Loader2 className="animate-spin"/> Cargando movimientos...</div></td></tr>
               ) : movements.length === 0 ? (
-                <tr>
-                  <td colSpan="5" className="p-8 text-center text-slate-400">No hay ventas registradas hoy.</td>
-                </tr>
+                <tr><td colSpan="5" className="p-8 text-center text-slate-400">No hay ventas registradas hoy.</td></tr>
               ) : (
                 movements.map((mov) => (
                   <tr key={mov.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="p-4 text-slate-600 font-mono text-sm">
-                      {new Date(mov.created_at).toLocaleTimeString('es-PE', {hour: '2-digit', minute:'2-digit'})}
-                    </td>
+                    <td className="p-4 text-slate-600 font-mono text-sm">{new Date(mov.created_at).toLocaleTimeString('es-PE', {hour: '2-digit', minute:'2-digit'})}</td>
                     <td className="p-4 text-slate-800 font-bold text-sm">#{mov.id.toString().slice(0,8)}...</td>
                     <td className="p-4 text-slate-600 text-sm">Mesa {mov.mesas?.name || 'Unknown'}</td>
-                    <td className="p-4">
-                      <span className={`px-2 py-1 rounded text-xs font-bold uppercase 
-                        ${mov.metodo_pago === 'efectivo' ? 'bg-green-100 text-green-700' : 
-                          mov.metodo_pago === 'tarjeta' ? 'bg-indigo-100 text-indigo-700' : 'bg-purple-100 text-purple-700'}`}>
-                        {mov.metodo_pago}
-                      </span>
-                    </td>
+                    <td className="p-4"><span className={`px-2 py-1 rounded text-xs font-bold uppercase ${mov.metodo_pago === 'efectivo' ? 'bg-green-100 text-green-700' : mov.metodo_pago === 'tarjeta' ? 'bg-indigo-100 text-indigo-700' : 'bg-purple-100 text-purple-700'}`}>{mov.metodo_pago}</span></td>
                     <td className="p-4 text-right font-bold text-slate-800">S/{parseFloat(mov.total).toFixed(2)}</td>
                   </tr>
                 ))

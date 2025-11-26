@@ -4,9 +4,8 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Mail, Lock, Loader2, UtensilsCrossed, ArrowRight, AlertCircle, Star } from 'lucide-react';
 
-// 1. IMPORTA TU IMAGEN AQUÍ
-// Si no tienes una local, puedes borrar esta línea y usar la URL en el 'src' de abajo
-import bgImage from '../assets/login-bg.jpg'; 
+// Imagen de fondo (puedes cambiarla por una importación local si prefieres)
+const bgImageURL = "https://images.unsplash.com/photo-1577219491135-ce391730fb2c?q=80&w=2077&auto=format&fit=crop";
 
 const Login = () => {
   const navigate = useNavigate();
@@ -21,10 +20,11 @@ const Login = () => {
     setErrorMsg(null);
 
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
+      const { error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
+
       if (error) throw error;
       navigate('/');
     } catch (error) {
@@ -38,23 +38,29 @@ const Login = () => {
   return (
     <div className="min-h-screen flex bg-white">
       
-      {/* --- SECCIÓN IZQUIERDA (IMAGEN) --- */}
+      {/* SECCIÓN IZQUIERDA (IMAGEN ANIMADA) */}
       <div className="hidden lg:block relative w-1/2 bg-slate-900 overflow-hidden">
-        
-        {/* 2. AQUÍ VA LA IMAGEN DE FONDO */}
         <div className="absolute inset-0">
-          <img 
-            // Usa la variable importada 'bgImage' o una URL directa como:
-            // src="https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?q=80&w=2070&auto=format&fit=crop"
-            src={bgImage} 
+          <motion.img 
+            src={bgImageURL} 
             alt="Fondo Restaurante" 
-            className="w-full h-full object-cover opacity-60" // opacity-60 oscurece la imagen para que se lea el texto
+            className="w-full h-full object-cover opacity-60"
+            initial={{ scale: 1 }} 
+            animate={{ 
+                scale: 1.1,         
+                x: ["0%", "-3%", "0%"], 
+                y: ["0%", "-2%", "0%"]  
+            }}
+            transition={{ 
+                duration: 25,
+                ease: "easeInOut",  
+                repeat: Infinity,   
+                repeatType: "reverse" 
+            }}
           />
-          {/* Gradiente extra para que el texto de abajo resalte más */}
-          <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-slate-900/20 to-transparent"></div>
+          <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-slate-900/40 to-transparent"></div>
         </div>
         
-        {/* Contenido sobre la imagen (Testimonio) */}
         <div className="absolute bottom-0 left-0 right-0 p-16 text-white z-10">
           <motion.div 
              initial={{ opacity: 0, y: 20 }}
@@ -84,7 +90,7 @@ const Login = () => {
         </div>
       </div>
 
-      {/* --- SECCIÓN DERECHA (FORMULARIO) --- */}
+      {/* SECCIÓN DERECHA (FORMULARIO) */}
       <div className="w-full lg:w-1/2 flex items-center justify-center p-8 sm:p-12 lg:p-24 bg-white relative">
         <motion.div 
           initial={{ opacity: 0, x: 20 }} 
@@ -128,7 +134,7 @@ const Login = () => {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="block w-full pl-11 pr-4 py-3.5 bg-white border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium"
-                  placeholder="ejemplo@restosystem.com"
+                  placeholder="admin@restaurante.com"
                 />
               </div>
             </div>
@@ -166,7 +172,6 @@ const Login = () => {
           </form>
         </motion.div>
       </div>
-      
     </div>
   );
 };

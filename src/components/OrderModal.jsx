@@ -10,13 +10,12 @@ const categoryIcons = {
   'postres': <IceCream size={16}/>,
 };
 
-// --- FUNCIÓN DE IMPRESIÓN DE TICKET ---
+// --- FUNCIÓN DE IMPRESIÓN ---
 const printOrderTicket = (tableName, items, waiterName = "Mesero") => {
   const now = new Date();
   const dateStr = now.toLocaleDateString('es-PE');
   const timeStr = now.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
 
-  // Diseño del Ticket en HTML para impresoras de 58mm/80mm
   const ticketContent = `
     <html>
       <head>
@@ -26,7 +25,6 @@ const printOrderTicket = (tableName, items, waiterName = "Mesero") => {
           .header { text-align: center; margin-bottom: 10px; border-bottom: 1px dashed #000; padding-bottom: 5px; }
           .title { font-size: 18px; font-weight: bold; margin-bottom: 5px; }
           .meta { font-size: 12px; margin-bottom: 2px; }
-          .section-title { font-weight: bold; border-bottom: 1px solid #000; margin-top: 10px; margin-bottom: 5px; }
           .item { display: flex; margin-bottom: 5px; font-size: 14px; }
           .qty { font-weight: bold; width: 30px; }
           .name { flex: 1; }
@@ -40,7 +38,6 @@ const printOrderTicket = (tableName, items, waiterName = "Mesero") => {
           <div class="meta">Fecha: ${dateStr} - ${timeStr}</div>
           <div class="meta">Atiende: ${waiterName}</div>
         </div>
-        
         <div class="items">
           ${items.map(item => `
             <div class="item">
@@ -49,15 +46,11 @@ const printOrderTicket = (tableName, items, waiterName = "Mesero") => {
             </div>
           `).join('')}
         </div>
-
-        <div class="footer">
-          *** FIN DE ORDEN ***
-        </div>
+        <div class="footer">*** FIN DE ORDEN ***</div>
       </body>
     </html>
   `;
 
-  // Crear ventana oculta e imprimir
   const printWindow = window.open('', '_blank', 'width=400,height=600');
   if (printWindow) {
     printWindow.document.write(ticketContent);
@@ -178,6 +171,9 @@ const OrderModal = ({ isOpen, onClose, table }) => {
     setSendingOrder(true);
 
     try {
+      // OBTENER USUARIO ACTUAL
+      const { data: { user } } = await supabase.auth.getUser();
+
       const newOrderTotal = order.reduce((acc, item) => acc + (item.price * item.quantity), 0);
       let orderId = null;
 
@@ -195,7 +191,12 @@ const OrderModal = ({ isOpen, onClose, table }) => {
       } else {
         const { data: newOrder, error: createError } = await supabase
             .from('ordenes')
-            .insert([{ mesa_id: table.id, total: newOrderTotal, estado: 'cocinando' }])
+            .insert([{ 
+                mesa_id: table.id, 
+                total: newOrderTotal, 
+                estado: 'cocinando',
+                user_id: user?.id // GUARDA EL USUARIO
+            }])
             .select()
             .single();
         if (createError) throw createError;
@@ -227,9 +228,9 @@ const OrderModal = ({ isOpen, onClose, table }) => {
         })
         .eq('id', table.id);
 
-      // --- IMPRIMIR TICKET AUTOMÁTICAMENTE ---
-      printOrderTicket(table.name, order);
-      // ---------------------------------------
+      // IMPRESIÓN DEL TICKET
+      const waiterName = user?.email?.split('@')[0] || "Mesero";
+      printOrderTicket(table.name, order, waiterName);
 
       onClose();
 
@@ -300,7 +301,7 @@ const OrderModal = ({ isOpen, onClose, table }) => {
             </div>
         </div>
 
-        {/* IZQUIERDA: MENÚ (Se oculta si estamos en pantalla de pago) */}
+        {/* IZQUIERDA: MENÚ */}
         <div className={`flex-1 flex flex-col bg-white relative ${activeTab === 'menu' && !showPayment ? 'flex' : 'hidden md:flex'}`}>
           <div className="hidden md:block p-4 border-b border-slate-100">
              <div className="flex justify-between items-center mb-4">
@@ -321,7 +322,6 @@ const OrderModal = ({ isOpen, onClose, table }) => {
                 ))}
             </div>
           </div>
-          
           <div className="flex-1 overflow-y-auto p-4 bg-slate-50/50 pb-24">
             {loadingProducts ? <div className="h-40 flex items-center justify-center text-slate-400"><Loader2 className="animate-spin mr-2"/> Cargando...</div> : (
                 <div className="space-y-3">
@@ -348,7 +348,6 @@ const OrderModal = ({ isOpen, onClose, table }) => {
                 </div>
             )}
           </div>
-          
           {/* BARRA FLOTANTE MÓVIL */}
           <AnimatePresence>
             {order.length > 0 && !showPayment && (
@@ -367,30 +366,25 @@ const OrderModal = ({ isOpen, onClose, table }) => {
 
         {/* DERECHA: TICKET / PAGO */}
         <div className={`w-full md:w-[400px] bg-white md:border-l border-slate-200 flex flex-col ${activeTab === 'ticket' || showPayment ? 'flex' : 'hidden md:flex'}`}>
-            
             {showPayment ? (
                 <div className="flex flex-col h-full">
                     <div className="p-5 border-b border-slate-100 flex items-center gap-3">
                         <button onClick={() => setShowPayment(false)} className="p-2 hover:bg-slate-100 rounded-full"><ArrowLeft size={20} className="text-slate-600"/></button>
                         <h3 className="font-bold text-lg text-slate-800">Método de Pago</h3>
                     </div>
-                    
                     <div className="flex-1 p-6 flex flex-col gap-4 justify-center">
                         <div className="text-center mb-6">
                             <p className="text-slate-400 text-sm uppercase font-bold tracking-wider">Total a Cobrar</p>
                             <p className="text-5xl font-bold text-slate-900 mt-2">S/{grandTotal.toFixed(2)}</p>
                         </div>
-
                         <button onClick={() => handlePayment('efectivo')} className="flex items-center gap-4 p-4 rounded-2xl border-2 border-slate-100 hover:border-green-500 hover:bg-green-50 transition-all group">
                             <div className="w-12 h-12 rounded-full bg-green-100 text-green-600 flex items-center justify-center group-hover:scale-110 transition-transform"><Banknote size={24}/></div>
                             <div className="text-left"><h4 className="font-bold text-slate-800">Efectivo</h4><p className="text-xs text-slate-400">Pago directo</p></div>
                         </button>
-
                         <button onClick={() => handlePayment('tarjeta')} className="flex items-center gap-4 p-4 rounded-2xl border-2 border-slate-100 hover:border-blue-500 hover:bg-blue-50 transition-all group">
                             <div className="w-12 h-12 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center group-hover:scale-110 transition-transform"><CreditCard size={24}/></div>
                             <div className="text-left"><h4 className="font-bold text-slate-800">Tarjeta</h4><p className="text-xs text-slate-400">Visa / Mastercard</p></div>
                         </button>
-
                         <button onClick={() => handlePayment('yape')} className="flex items-center gap-4 p-4 rounded-2xl border-2 border-slate-100 hover:border-purple-500 hover:bg-purple-50 transition-all group">
                             <div className="w-12 h-12 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center group-hover:scale-110 transition-transform"><Smartphone size={24}/></div>
                             <div className="text-left"><h4 className="font-bold text-slate-800">Yape / Plin</h4><p className="text-xs text-slate-400">QR Digital</p></div>
@@ -402,9 +396,7 @@ const OrderModal = ({ isOpen, onClose, table }) => {
                     <div className="hidden md:flex p-5 border-b border-slate-100 justify-between items-center bg-white">
                         <div><h3 className="font-bold text-lg text-slate-800">Pedido Actual</h3><div className="flex items-center gap-2"><span className="text-xs font-bold bg-blue-100 text-blue-600 px-2 py-0.5 rounded">Mesa {table?.name}</span></div></div>
                     </div>
-
                     <div className="flex-1 overflow-y-auto bg-white">
-                        {/* PEDIDOS GUARDADOS */}
                         {savedOrder.length > 0 && (
                             <div className="bg-slate-50 border-b border-slate-200">
                                 <div className="px-4 py-2 text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2 bg-slate-100">
@@ -420,8 +412,6 @@ const OrderModal = ({ isOpen, onClose, table }) => {
                                 ))}
                             </div>
                         )}
-
-                        {/* PEDIDOS NUEVOS */}
                         {order.length > 0 && (
                             <div>
                                 <div className="px-4 py-2 text-xs font-bold text-blue-600 uppercase tracking-wider bg-blue-50 border-y border-blue-100">Nuevo (Por enviar)</div>
@@ -439,12 +429,10 @@ const OrderModal = ({ isOpen, onClose, table }) => {
                                 ))}
                             </div>
                         )}
-
                         {savedOrder.length === 0 && order.length === 0 && (
                             <div className="h-64 flex flex-col items-center justify-center text-slate-400 opacity-60"><ShoppingBag size={48} strokeWidth={1} className="mb-2"/><p className="text-sm">Mesa sin pedidos</p></div>
                         )}
                     </div>
-
                     <div className="p-4 bg-slate-50 border-t border-slate-200">
                         <div className="flex justify-between items-center mb-4">
                             <span className="text-slate-500 font-bold">Total General:</span>
@@ -461,12 +449,7 @@ const OrderModal = ({ isOpen, onClose, table }) => {
                             ) : (
                                 <>
                                     <button type="button" onClick={onClose} className="py-3 rounded-xl font-bold text-slate-500 bg-white border border-slate-200 hover:bg-slate-100">Cerrar</button>
-                                    <button 
-                                        type="button" 
-                                        disabled={savedOrder.length === 0} 
-                                        onClick={() => setShowPayment(true)} 
-                                        className="py-3 rounded-xl font-bold text-white bg-slate-900 hover:bg-slate-800 shadow-lg flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                                    >
+                                    <button type="button" disabled={savedOrder.length === 0} onClick={() => setShowPayment(true)} className="py-3 rounded-xl font-bold text-white bg-slate-900 hover:bg-slate-800 shadow-lg flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
                                         <Banknote size={18}/> Cobrar Mesa
                                     </button>
                                 </>
@@ -476,7 +459,6 @@ const OrderModal = ({ isOpen, onClose, table }) => {
                 </>
             )}
         </div>
-
       </motion.div>
     </div>
   );
