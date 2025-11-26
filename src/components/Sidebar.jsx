@@ -1,5 +1,6 @@
 import React from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
+import { supabase } from '../supabase/client';
 import { 
   LayoutGrid, 
   Settings, 
@@ -7,19 +8,28 @@ import {
   ChevronLeft, 
   ChevronRight, 
   UtensilsCrossed, 
-  MoreVertical 
+  MoreVertical,
+  Receipt // Icono para Caja
 } from 'lucide-react';
 
 const Sidebar = ({ isOpen, toggleSidebar }) => {
+  const navigate = useNavigate();
+
+  // Función para cerrar sesión
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    navigate('/login');
+  };
   
-  // Menú simplificado (Solo Mesas y Ajustes)
+  // Menú actualizado con las nuevas rutas
   const menuItems = [
     { path: '/', name: 'Salón / Mesas', icon: <LayoutGrid size={20} /> },
+    { path: '/caja', name: 'Caja', icon: <Receipt size={20} /> },
     { path: '/config', name: 'Ajustes', icon: <Settings size={20} /> },
   ];
 
   return (
-    // CLAVE: 'hidden md:flex' oculta el sidebar en celular y lo muestra en PC
+    // 'hidden md:flex' asegura que solo se vea en escritorio
     <div 
       className={`hidden md:flex fixed left-4 top-4 bottom-4 bg-white border border-slate-200 flex-col transition-all duration-300 z-50 shadow-xl rounded-3xl overflow-hidden ${
         isOpen ? 'w-72' : 'w-20'
@@ -81,22 +91,26 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
         </nav>
       </div>
 
-      {/* 4. PERFIL DE USUARIO (Footer del Sidebar) */}
+      {/* 4. PERFIL DE USUARIO / CERRAR SESIÓN (Footer del Sidebar) */}
       <div className="p-4 mt-auto">
-        <div className={`flex items-center p-2 rounded-2xl border border-transparent hover:border-slate-100 hover:bg-slate-50 transition-all cursor-pointer ${isOpen ? 'gap-3' : 'justify-center'}`}>
+        <button 
+            onClick={handleLogout}
+            className={`w-full flex items-center p-2 rounded-2xl border border-transparent hover:border-red-100 hover:bg-red-50 transition-all cursor-pointer group ${isOpen ? 'gap-3' : 'justify-center'}`}
+            title="Cerrar Sesión"
+        >
             <img 
                 src="https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?ixlib=rb-1.2.1&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80" 
                 alt="User" 
-                className="w-10 h-10 rounded-full object-cover border-2 border-white shadow-sm"
+                className="w-10 h-10 rounded-full object-cover border-2 border-white shadow-sm group-hover:border-red-200 transition-colors"
             />
             {isOpen && (
-                <div className="flex-1 overflow-hidden">
-                    <h4 className="text-sm font-bold text-slate-800 truncate">Diego P.</h4>
+                <div className="flex-1 overflow-hidden text-left">
+                    <h4 className="text-sm font-bold text-slate-800 truncate group-hover:text-red-600 transition-colors">Cerrar Sesión</h4>
                     <p className="text-xs text-slate-500 truncate">Administrador</p>
                 </div>
             )}
-            {isOpen && <MoreVertical size={16} className="text-slate-400" />}
-        </div>
+            {isOpen && <MoreVertical size={16} className="text-slate-400 group-hover:text-red-400" />}
+        </button>
       </div>
 
     </div>

@@ -10,6 +10,68 @@ const categoryIcons = {
   'postres': <IceCream size={16}/>,
 };
 
+// --- FUNCIÓN DE IMPRESIÓN DE TICKET ---
+const printOrderTicket = (tableName, items, waiterName = "Mesero") => {
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('es-PE');
+  const timeStr = now.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
+
+  // Diseño del Ticket en HTML para impresoras de 58mm/80mm
+  const ticketContent = `
+    <html>
+      <head>
+        <title>Ticket de Comanda</title>
+        <style>
+          body { font-family: 'Courier New', monospace; width: 280px; font-size: 14px; margin: 0; padding: 5px; color: #000; }
+          .header { text-align: center; margin-bottom: 10px; border-bottom: 1px dashed #000; padding-bottom: 5px; }
+          .title { font-size: 18px; font-weight: bold; margin-bottom: 5px; }
+          .meta { font-size: 12px; margin-bottom: 2px; }
+          .section-title { font-weight: bold; border-bottom: 1px solid #000; margin-top: 10px; margin-bottom: 5px; }
+          .item { display: flex; margin-bottom: 5px; font-size: 14px; }
+          .qty { font-weight: bold; width: 30px; }
+          .name { flex: 1; }
+          .footer { margin-top: 15px; border-top: 1px dashed #000; padding-top: 5px; text-align: center; font-size: 12px; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div class="title">COMANDA COCINA</div>
+          <div class="meta">Mesa: <strong>${tableName}</strong></div>
+          <div class="meta">Fecha: ${dateStr} - ${timeStr}</div>
+          <div class="meta">Atiende: ${waiterName}</div>
+        </div>
+        
+        <div class="items">
+          ${items.map(item => `
+            <div class="item">
+              <span class="qty">${item.quantity}</span>
+              <span class="name">${item.name}</span>
+            </div>
+          `).join('')}
+        </div>
+
+        <div class="footer">
+          *** FIN DE ORDEN ***
+        </div>
+      </body>
+    </html>
+  `;
+
+  // Crear ventana oculta e imprimir
+  const printWindow = window.open('', '_blank', 'width=400,height=600');
+  if (printWindow) {
+    printWindow.document.write(ticketContent);
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => {
+      printWindow.print();
+      printWindow.close();
+    }, 500);
+  } else {
+    alert("Habilita las ventanas emergentes para imprimir el ticket.");
+  }
+};
+
 const ProductAvatar = ({ src, name }) => {
   const [hasError, setHasError] = useState(false);
   if (!src || hasError) {
@@ -35,14 +97,13 @@ const OrderModal = ({ isOpen, onClose, table }) => {
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [sendingOrder, setSendingOrder] = useState(false);
   
-  // NUEVO: Estado para mostrar la pantalla de pago
   const [showPayment, setShowPayment] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
       setOrder([]);
       setSavedOrder([]);
-      setShowPayment(false); // Resetear pantalla de pago
+      setShowPayment(false); 
       fetchData();
       setActiveTab('menu'); 
     }
@@ -77,13 +138,11 @@ const OrderModal = ({ isOpen, onClose, table }) => {
     setLoadingProducts(false);
   };
 
-  // --- FUNCIÓN DE PAGO (COBRAR) ---
   const handlePayment = async (method) => {
     if (!confirm(`¿Confirmar pago de S/${grandTotal.toFixed(2)} con ${method.toUpperCase()}?`)) return;
     
     setSendingOrder(true);
     try {
-        // 1. Cerrar la Orden (Ponerla como pagada)
         await supabase
             .from('ordenes')
             .update({ 
@@ -93,7 +152,6 @@ const OrderModal = ({ isOpen, onClose, table }) => {
             })
             .eq('id', table.current_order_id);
 
-        // 2. Liberar la Mesa
         await supabase
             .from('mesas')
             .update({ 
@@ -168,6 +226,10 @@ const OrderModal = ({ isOpen, onClose, table }) => {
             time_opened: table.time_opened || new Date().toISOString()
         })
         .eq('id', table.id);
+
+      // --- IMPRIMIR TICKET AUTOMÁTICAMENTE ---
+      printOrderTicket(table.name, order);
+      // ---------------------------------------
 
       onClose();
 
@@ -306,7 +368,6 @@ const OrderModal = ({ isOpen, onClose, table }) => {
         {/* DERECHA: TICKET / PAGO */}
         <div className={`w-full md:w-[400px] bg-white md:border-l border-slate-200 flex flex-col ${activeTab === 'ticket' || showPayment ? 'flex' : 'hidden md:flex'}`}>
             
-            {/* -- VISTA DE PAGO (Si showPayment es true) -- */}
             {showPayment ? (
                 <div className="flex flex-col h-full">
                     <div className="p-5 border-b border-slate-100 flex items-center gap-3">
@@ -337,7 +398,6 @@ const OrderModal = ({ isOpen, onClose, table }) => {
                     </div>
                 </div>
             ) : (
-                // -- VISTA NORMAL DEL TICKET --
                 <>
                     <div className="hidden md:flex p-5 border-b border-slate-100 justify-between items-center bg-white">
                         <div><h3 className="font-bold text-lg text-slate-800">Pedido Actual</h3><div className="flex items-center gap-2"><span className="text-xs font-bold bg-blue-100 text-blue-600 px-2 py-0.5 rounded">Mesa {table?.name}</span></div></div>
@@ -391,7 +451,6 @@ const OrderModal = ({ isOpen, onClose, table }) => {
                             <span className="text-2xl font-bold text-slate-900">S/{grandTotal.toFixed(2)}</span>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
-                            {/* Si hay pedidos nuevos, mostramos ENVIAR. Si no hay nuevos pero hay guardados, mostramos COBRAR */}
                             {order.length > 0 ? (
                                 <>
                                     <button type="button" onClick={onClose} className="py-3 rounded-xl font-bold text-slate-500 bg-white border border-slate-200 hover:bg-slate-100">Volver</button>
@@ -405,7 +464,7 @@ const OrderModal = ({ isOpen, onClose, table }) => {
                                     <button 
                                         type="button" 
                                         disabled={savedOrder.length === 0} 
-                                        onClick={() => setShowPayment(true)} // Activar modo pago
+                                        onClick={() => setShowPayment(true)} 
                                         className="py-3 rounded-xl font-bold text-white bg-slate-900 hover:bg-slate-800 shadow-lg flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                         <Banknote size={18}/> Cobrar Mesa
