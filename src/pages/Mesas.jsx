@@ -12,7 +12,7 @@ const Mesas = () => {
   const [selectedTable, setSelectedTable] = useState(null);
   const [moveSource, setMoveSource] = useState(null);
   
-  // ESTADO RELOJ: Para actualizar el tiempo en vivo visualmente
+  // ESTADO RELOJ: Actualiza la UI cada segundo
   const [now, setNow] = useState(new Date());
 
   const zones = ["Salón Principal", "Terraza", "Barra"];
@@ -21,25 +21,22 @@ const Mesas = () => {
   useEffect(() => {
     fetchTables();
 
-    console.log("Iniciando suscripción a mesas...");
-
     // Suscripción a cambios en la base de datos
     const channel = supabase
-      .channel('tabla_mesas_live') // Nombre único del canal
+      .channel('tabla_mesas_live')
       .on(
         'postgres_changes', 
         { event: '*', schema: 'public', table: 'mesas' }, 
         (payload) => {
-          console.log("Cambio detectado en DB:", payload);
           fetchTables(); // Recargar datos inmediatamente
         }
       )
       .subscribe();
 
-    // Intervalo para actualizar el contador de minutos cada 60 seg
+    // CAMBIO CRÍTICO: Actualizar cada 1 segundo (1000ms) para ver los segundos
     const timerInterval = setInterval(() => {
       setNow(new Date());
-    }, 60000);
+    }, 1000);
 
     return () => {
       supabase.removeChannel(channel);
@@ -92,7 +89,6 @@ const Mesas = () => {
       if (errorSource) throw errorSource;
 
       setMoveSource(null);
-      // No hace falta llamar a fetchTables() aquí porque el Realtime lo hará solo ;)
 
     } catch (error) {
       console.error("Error en traslado:", error);
@@ -102,14 +98,26 @@ const Mesas = () => {
 
   const filteredTables = tables.filter(t => t.zone === activeZone);
 
-  // Calculadora de tiempo visual
+  // --- 3. CALCULADORA DE TIEMPO (FORMATO HH:MM:SS) ---
   const calculateTime = (timestamp) => {
-    if (!timestamp) return null;
+    if (!timestamp) return '00:00:00';
+    
     const start = new Date(timestamp);
-    // Usamos 'now' (estado) en vez de new Date() para que se refresque solo
-    const diffMs = now - start; 
-    const diffMins = Math.floor(diffMs / 60000);
-    return `${diffMins} min`;
+    const diff = now - start; // Diferencia en milisegundos
+
+    if (diff < 0) return '00:00:00';
+
+    // Matemáticas para obtener horas, minutos y segundos
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+
+    // Formatear con ceros a la izquierda (01:05:09)
+    const h = String(hours).padStart(2, '0');
+    const m = String(minutes).padStart(2, '0');
+    const s = String(seconds).padStart(2, '0');
+
+    return `${h}:${m}:${s}`;
   };
 
   // Estilos dinámicos
@@ -208,7 +216,7 @@ const Mesas = () => {
         ))}
       </div>
 
-      {/* GRID DE MESAS (2 Columnas en Móvil) */}
+      {/* GRID DE MESAS */}
       <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-6 pb-24">
         {filteredTables.map((table) => (
           <motion.div
@@ -221,7 +229,7 @@ const Mesas = () => {
             className={`relative p-4 sm:p-5 rounded-3xl border cursor-pointer flex flex-col justify-between min-h-[140px] group transition-all ${getStatusStyles(table.status)}`}
           >
             
-            {/* Botón Traslado (Solo si ocupada) */}
+            {/* Botón Traslado */}
             {table.status !== 'libre' && (
               <button 
                 onClick={(e) => {
@@ -257,13 +265,14 @@ const Mesas = () => {
                {getStatusBadge(table.status)}
             </div>
 
-            {/* Info Detallada */}
+            {/* Info Detallada con Tiempo Real */}
             {table.status !== 'libre' ? (
               <div className="space-y-1 bg-white/60 p-2 rounded-xl border border-black/5">
                 <div className="flex items-center justify-between text-[10px] sm:text-xs text-slate-500">
                   <span className="flex items-center gap-1"><Clock size={10}/> Tiempo</span>
-                  <span className="font-mono font-bold text-slate-700">
-                    {table.time_opened ? calculateTime(table.time_opened) : '0 min'}
+                  {/* AQUÍ SE MUESTRA EL NUEVO FORMATO */}
+                  <span className="font-mono font-bold text-slate-700 tracking-tight">
+                    {table.time_opened ? calculateTime(table.time_opened) : '00:00:00'}
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-[10px] sm:text-xs text-slate-500">

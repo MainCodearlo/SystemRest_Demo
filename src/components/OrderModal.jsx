@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Search, Plus, Minus, Trash2, ChefHat, ShoppingBag, UtensilsCrossed, Coffee, Beer, IceCream, Loader2, Lock, CheckCircle2, ChevronRight, CreditCard, Banknote, Smartphone, ArrowLeft } from 'lucide-react';
+import { X, Search, Plus, Minus, Trash2, ChefHat, ShoppingBag, UtensilsCrossed, Coffee, Beer, IceCream, Loader2, Lock, CheckCircle2, ChevronRight, CreditCard, Banknote, Smartphone, ArrowLeft, AlertTriangle } from 'lucide-react';
 import { supabase } from '../supabase/client';
 
 const categoryIcons = {
@@ -9,6 +9,8 @@ const categoryIcons = {
   'bebidas': <Beer size={16}/>,
   'postres': <IceCream size={16}/>,
 };
+
+const PRODUCTS_PER_PAGE = 10;
 
 // --- FUNCIÓN DE IMPRESIÓN ---
 const printOrderTicket = (tableName, items, waiterName = "Mesero") => {
@@ -60,8 +62,6 @@ const printOrderTicket = (tableName, items, waiterName = "Mesero") => {
       printWindow.print();
       printWindow.close();
     }, 500);
-  } else {
-    alert("Habilita las ventanas emergentes para imprimir el ticket.");
   }
 };
 
@@ -79,6 +79,7 @@ const ProductAvatar = ({ src, name }) => {
 
 const OrderModal = ({ isOpen, onClose, table }) => {
   const [activeTab, setActiveTab] = useState('menu');
+  
   const [selectedCategory, setSelectedCategory] = useState('todos');
   const [search, setSearch] = useState('');
   
@@ -87,79 +88,121 @@ const OrderModal = ({ isOpen, onClose, table }) => {
 
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
-  const [loadingProducts, setLoadingProducts] = useState(true);
-  const [sendingOrder, setSendingOrder] = useState(false);
+  const [loadingProducts, setLoadingProducts] = useState(false);
+  const [hasMore, setHasMore] = useState(true); 
+  const [page, setPage] = useState(0); 
   
+  const [sendingOrder, setSendingOrder] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
+
+  // --- NUEVO ESTADO: CAJA ABIERTA ---
+  const [isCashOpen, setIsCashOpen] = useState(false); 
+  // ----------------------------------
+
+  const scrollContainerRef = useRef(null);
 
   useEffect(() => {
     if (isOpen) {
       setOrder([]);
       setSavedOrder([]);
-      setShowPayment(false); 
-      fetchData();
-      setActiveTab('menu'); 
+      setShowPayment(false);
+      setActiveTab('menu');
+      setSearch('');
+      setSelectedCategory('todos');
+      
+      fetchInitialData(); 
+      checkCashStatus(); // <--- VERIFICAR CAJA AL ABRIR
+
+      setProducts([]);
+      setPage(0);
+      setHasMore(true);
+      fetchProducts(0, 'todos', '');
     }
   }, [isOpen, table]);
 
-  const fetchData = async () => {
-    setLoadingProducts(true);
+  useEffect(() => {
+    if (!isOpen) return;
+    const timeoutId = setTimeout(() => {
+      setProducts([]); 
+      setPage(0);      
+      setHasMore(true);
+      setLoadingProducts(true);
+      fetchProducts(0, selectedCategory, search);
+    }, 300); 
+    return () => clearTimeout(timeoutId);
+  }, [selectedCategory, search]);
+
+  // --- VERIFICAR ESTADO DE CAJA ---
+  const checkCashStatus = async () => {
+    const { data } = await supabase
+        .from('caja_sesiones')
+        .select('id')
+        .eq('estado', 'abierta')
+        .maybeSingle();
+    
+    setIsCashOpen(!!data); // True si hay caja abierta, False si no
+  };
+
+  const fetchInitialData = async () => {
     const { data: catData } = await supabase.from('categorias').select('*');
     setCategories(catData || []);
-    const { data: prodData } = await supabase.from('productos').select('*');
-    setProducts(prodData || []);
 
     if (table && table.status === 'ocupada' && table.current_order_id) {
-        const { data: activeOrder } = await supabase
-            .from('ordenes')
-            .select('id')
-            .eq('mesa_id', table.id)
-            .eq('estado', 'cocinando')
-            .maybeSingle();
-
-        if (activeOrder) {
-            const { data: items } = await supabase
-                .from('orden_items')
-                .select('*')
-                .eq('orden_id', activeOrder.id);
-            
-            if (items && items.length > 0) {
-                setSavedOrder(items);
-            }
+        const { data: items } = await supabase
+            .from('orden_items')
+            .select('*')
+            .eq('orden_id', table.current_order_id);
+        
+        if (items && items.length > 0) {
+            setSavedOrder(items);
         }
+    }
+  };
+
+  const fetchProducts = async (pageNumber, categoryId, searchTerm) => {
+    setLoadingProducts(true);
+    const from = pageNumber * PRODUCTS_PER_PAGE;
+    const to = from + PRODUCTS_PER_PAGE - 1;
+
+    let query = supabase.from('productos').select('*').range(from, to); 
+
+    if (categoryId !== 'todos') query = query.eq('category_id', categoryId);
+    if (searchTerm) query = query.ilike('name', `%${searchTerm}%`); 
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error("Error cargando productos:", error);
+    } else {
+      if (data.length < PRODUCTS_PER_PAGE) setHasMore(false); 
+      setProducts(prev => pageNumber === 0 ? data : [...prev, ...data]);
     }
     setLoadingProducts(false);
   };
 
+  const handleScroll = () => {
+    if (scrollContainerRef.current) {
+      const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
+      if (scrollHeight - scrollTop <= clientHeight + 50 && !loadingProducts && hasMore) {
+        const nextPage = page + 1;
+        setPage(nextPage);
+        fetchProducts(nextPage, selectedCategory, search);
+      }
+    }
+  };
+
   const handlePayment = async (method) => {
+    // DOBLE PROTECCIÓN
+    if (!isCashOpen) return alert("¡Caja Cerrada! No se puede cobrar.");
+
     if (!confirm(`¿Confirmar pago de S/${grandTotal.toFixed(2)} con ${method.toUpperCase()}?`)) return;
-    
     setSendingOrder(true);
     try {
-        await supabase
-            .from('ordenes')
-            .update({ 
-                estado: 'pagado', 
-                metodo_pago: method,
-                total: grandTotal 
-            })
-            .eq('id', table.current_order_id);
-
-        await supabase
-            .from('mesas')
-            .update({ 
-                status: 'libre', 
-                total: 0, 
-                current_order_id: null,
-                time_opened: null
-            })
-            .eq('id', table.id);
-
+        await supabase.from('ordenes').update({ estado: 'pagado', metodo_pago: method, total: grandTotal }).eq('id', table.current_order_id);
+        await supabase.from('mesas').update({ status: 'libre', total: 0, current_order_id: null, time_opened: null }).eq('id', table.id);
         alert("¡Mesa cobrada y liberada!");
         onClose();
-
     } catch (error) {
-        console.error("Error al cobrar:", error);
         alert("Error al procesar el pago");
     } finally {
         setSendingOrder(false);
@@ -167,49 +210,29 @@ const OrderModal = ({ isOpen, onClose, table }) => {
   };
 
   const handleSendOrder = async () => {
+    // DOBLE PROTECCIÓN
+    if (!isCashOpen) return alert("¡Caja Cerrada! Abre la caja para comandar.");
+
     if (order.length === 0) return;
     setSendingOrder(true);
-
     try {
-      // OBTENER USUARIO ACTUAL
       const { data: { user } } = await supabase.auth.getUser();
-
       const newOrderTotal = order.reduce((acc, item) => acc + (item.price * item.quantity), 0);
       let orderId = null;
 
-      const { data: existingOrder } = await supabase
-        .from('ordenes')
-        .select('id, total')
-        .eq('mesa_id', table.id)
-        .eq('estado', 'cocinando')
-        .maybeSingle();
-
-      if (existingOrder) {
-        orderId = existingOrder.id;
-        const updatedTotal = parseFloat(existingOrder.total) + newOrderTotal;
-        await supabase.from('ordenes').update({ total: updatedTotal }).eq('id', orderId);
+      if (table.current_order_id) {
+          orderId = table.current_order_id;
+          const { data: currentOrderData } = await supabase.from('ordenes').select('total').eq('id', orderId).single();
+          const previousTotal = currentOrderData ? parseFloat(currentOrderData.total) : 0;
+          await supabase.from('ordenes').update({ total: previousTotal + newOrderTotal }).eq('id', orderId);
       } else {
-        const { data: newOrder, error: createError } = await supabase
-            .from('ordenes')
-            .insert([{ 
-                mesa_id: table.id, 
-                total: newOrderTotal, 
-                estado: 'cocinando',
-                user_id: user?.id // GUARDA EL USUARIO
-            }])
-            .select()
-            .single();
-        if (createError) throw createError;
-        orderId = newOrder.id;
+          const { data: newOrder, error: createError } = await supabase.from('ordenes').insert([{ mesa_id: table.id, total: newOrderTotal, estado: 'cocinando', user_id: user?.id }]).select().single();
+          if (createError) throw createError;
+          orderId = newOrder.id;
       }
 
       const orderItems = order.map(item => ({
-        orden_id: orderId,
-        producto_id: item.id,
-        nombre_producto: item.name,
-        cantidad: item.quantity,
-        precio_unitario: item.price,
-        subtotal: item.price * item.quantity
+        orden_id: orderId, producto_id: item.id, nombre_producto: item.name, cantidad: item.quantity, precio_unitario: item.price, subtotal: item.price * item.quantity
       }));
 
       const { error: itemsError } = await supabase.from('orden_items').insert(orderItems);
@@ -218,25 +241,13 @@ const OrderModal = ({ isOpen, onClose, table }) => {
       const currentTableTotal = parseFloat(table.total || 0);
       const finalTableTotal = currentTableTotal + newOrderTotal;
 
-      await supabase
-        .from('mesas')
-        .update({ 
-            status: 'ocupada', 
-            total: finalTableTotal,
-            current_order_id: orderId,
-            time_opened: table.time_opened || new Date().toISOString()
-        })
-        .eq('id', table.id);
+      await supabase.from('mesas').update({ status: 'ocupada', total: finalTableTotal, current_order_id: orderId, time_opened: table.time_opened || new Date().toISOString() }).eq('id', table.id);
 
-      // IMPRESIÓN DEL TICKET
       const waiterName = user?.email?.split('@')[0] || "Mesero";
       printOrderTicket(table.name, order, waiterName);
-
       onClose();
-
     } catch (error) {
-      console.error("Error al enviar:", error);
-      alert("Error al guardar pedido.");
+      alert("Error al guardar pedido: " + error.message);
     } finally {
       setSendingOrder(false);
     }
@@ -272,11 +283,6 @@ const OrderModal = ({ isOpen, onClose, table }) => {
   const totalNew = order.reduce((acc, item) => acc + (item.price * item.quantity), 0);
   const totalSaved = savedOrder.reduce((acc, item) => acc + (parseFloat(item.precio_unitario) * item.cantidad), 0);
   const grandTotal = totalNew + totalSaved;
-  
-  const filteredProducts = products.filter(p => 
-    (selectedCategory === 'todos' || p.category_id === selectedCategory) &&
-    p.name.toLowerCase().includes(search.toLowerCase())
-  );
 
   if (!isOpen) return null;
 
@@ -309,6 +315,8 @@ const OrderModal = ({ isOpen, onClose, table }) => {
                 <button type="button" onClick={onClose}><X className="text-slate-400 hover:text-red-500"/></button>
              </div>
           </div>
+          
+          {/* BUSCADOR */}
           <div className="p-4 border-b border-slate-50 space-y-3">
              <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
@@ -322,33 +330,36 @@ const OrderModal = ({ isOpen, onClose, table }) => {
                 ))}
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto p-4 bg-slate-50/50 pb-24">
-            {loadingProducts ? <div className="h-40 flex items-center justify-center text-slate-400"><Loader2 className="animate-spin mr-2"/> Cargando...</div> : (
-                <div className="space-y-3">
-                    {filteredProducts.map(product => {
-                        const qty = getProductQty(product.id);
-                        return (
-                            <div key={product.id} onClick={() => addToOrder(product)} className={`flex items-center gap-3 bg-white p-3 rounded-xl border transition-all shadow-sm cursor-pointer select-none active:scale-[0.98] ${qty > 0 ? 'border-blue-500 ring-1 ring-blue-500 bg-blue-50/30' : 'border-slate-200'}`}>
-                                <div className="w-16 h-16 shrink-0 rounded-lg overflow-hidden bg-slate-100"><ProductAvatar src={product.image_url} name={product.name} /></div>
-                                <div className="flex-1 min-w-0"><h3 className="font-bold text-slate-800 text-sm truncate">{product.name}</h3><p className="text-xs text-slate-500">S/{product.price}</p></div>
-                                <div className="flex items-center" onClick={(e) => e.stopPropagation()}>
-                                    {qty === 0 ? (
-                                        <button type="button" onClick={() => addToOrder(product)} className="w-9 h-9 rounded-full bg-slate-100 text-blue-600 flex items-center justify-center hover:bg-blue-600 hover:text-white transition-colors"><Plus size={18} /></button>
-                                    ) : (
-                                        <div className="flex items-center bg-white rounded-full border border-slate-200 shadow-sm overflow-hidden h-9">
-                                            <button type="button" onClick={() => removeFromOrder(product.id)} className="w-9 h-full flex items-center justify-center text-red-500 hover:bg-red-50"><Minus size={16} /></button>
-                                            <span className="w-8 text-center font-bold text-sm text-slate-800">{qty}</span>
-                                            <button type="button" onClick={() => addToOrder(product)} className="w-9 h-full flex items-center justify-center text-blue-600 hover:bg-blue-50"><Plus size={16} /></button>
-                                        </div>
-                                    )}
-                                </div>
+          
+          {/* LISTA PRODUCTOS */}
+          <div className="flex-1 overflow-y-auto p-4 bg-slate-50/50 pb-24" ref={scrollContainerRef} onScroll={handleScroll}>
+            <div className="space-y-3">
+                {products.map(product => {
+                    const qty = getProductQty(product.id);
+                    return (
+                        <div key={product.id} onClick={() => addToOrder(product)} className={`flex items-center gap-3 bg-white p-3 rounded-xl border transition-all shadow-sm cursor-pointer select-none active:scale-[0.98] ${qty > 0 ? 'border-blue-500 ring-1 ring-blue-500 bg-blue-50/30' : 'border-slate-200'}`}>
+                            <div className="w-16 h-16 shrink-0 rounded-lg overflow-hidden bg-slate-100"><ProductAvatar src={product.image_url} name={product.name} /></div>
+                            <div className="flex-1 min-w-0"><h3 className="font-bold text-slate-800 text-sm truncate">{product.name}</h3><p className="text-xs text-slate-500">S/{product.price}</p></div>
+                            <div className="flex items-center" onClick={(e) => e.stopPropagation()}>
+                                {qty === 0 ? (
+                                    <button type="button" onClick={() => addToOrder(product)} className="w-9 h-9 rounded-full bg-slate-100 text-blue-600 flex items-center justify-center hover:bg-blue-600 hover:text-white transition-colors"><Plus size={18} /></button>
+                                ) : (
+                                    <div className="flex items-center bg-white rounded-full border border-slate-200 shadow-sm overflow-hidden h-9">
+                                        <button type="button" onClick={() => removeFromOrder(product.id)} className="w-9 h-full flex items-center justify-center text-red-500 hover:bg-red-50"><Minus size={16} /></button>
+                                        <span className="w-8 text-center font-bold text-sm text-slate-800">{qty}</span>
+                                        <button type="button" onClick={() => addToOrder(product)} className="w-9 h-full flex items-center justify-center text-blue-600 hover:bg-blue-50"><Plus size={16} /></button>
+                                    </div>
+                                )}
                             </div>
-                        );
-                    })}
-                </div>
-            )}
+                        </div>
+                    );
+                })}
+                {loadingProducts && <div className="py-4 flex justify-center text-slate-400 text-sm items-center"><Loader2 className="animate-spin mr-2 w-5 h-5"/> Cargando más...</div>}
+                {!loadingProducts && products.length === 0 && <div className="text-center py-10 text-slate-400"><ShoppingBag size={40} className="mx-auto mb-2 opacity-50"/><p>No se encontraron productos</p></div>}
+            </div>
           </div>
-          {/* BARRA FLOTANTE MÓVIL */}
+          
+          {/* BARRA FLOTANTE */}
           <AnimatePresence>
             {order.length > 0 && !showPayment && (
                 <motion.div initial={{ y: 100 }} animate={{ y: 0 }} exit={{ y: 100 }} className="absolute bottom-4 left-4 right-4 z-30 md:hidden">
@@ -366,8 +377,21 @@ const OrderModal = ({ isOpen, onClose, table }) => {
 
         {/* DERECHA: TICKET / PAGO */}
         <div className={`w-full md:w-[400px] bg-white md:border-l border-slate-200 flex flex-col ${activeTab === 'ticket' || showPayment ? 'flex' : 'hidden md:flex'}`}>
+            
+            {/* --- ALERTA CAJA CERRADA --- */}
+            {!isCashOpen && (
+                <div className="bg-red-500 text-white p-3 text-center text-sm font-bold flex items-center justify-center gap-2">
+                    <AlertTriangle size={18} /> 
+                    CAJA CERRADA - Solo lectura
+                </div>
+            )}
+            {/* -------------------------- */}
+
             {showPayment ? (
-                <div className="flex flex-col h-full">
+                <div className="flex flex-col h-full relative">
+                    {/* BLOQUEO DE PANTALLA PAGO SI CAJA ESTÁ CERRADA */}
+                    {!isCashOpen && <div className="absolute inset-0 bg-white/80 z-50 flex items-center justify-center font-bold text-slate-500">Función deshabilitada</div>}
+
                     <div className="p-5 border-b border-slate-100 flex items-center gap-3">
                         <button onClick={() => setShowPayment(false)} className="p-2 hover:bg-slate-100 rounded-full"><ArrowLeft size={20} className="text-slate-600"/></button>
                         <h3 className="font-bold text-lg text-slate-800">Método de Pago</h3>
@@ -377,15 +401,15 @@ const OrderModal = ({ isOpen, onClose, table }) => {
                             <p className="text-slate-400 text-sm uppercase font-bold tracking-wider">Total a Cobrar</p>
                             <p className="text-5xl font-bold text-slate-900 mt-2">S/{grandTotal.toFixed(2)}</p>
                         </div>
-                        <button onClick={() => handlePayment('efectivo')} className="flex items-center gap-4 p-4 rounded-2xl border-2 border-slate-100 hover:border-green-500 hover:bg-green-50 transition-all group">
+                        <button disabled={!isCashOpen} onClick={() => handlePayment('efectivo')} className="flex items-center gap-4 p-4 rounded-2xl border-2 border-slate-100 hover:border-green-500 hover:bg-green-50 transition-all group disabled:opacity-50">
                             <div className="w-12 h-12 rounded-full bg-green-100 text-green-600 flex items-center justify-center group-hover:scale-110 transition-transform"><Banknote size={24}/></div>
                             <div className="text-left"><h4 className="font-bold text-slate-800">Efectivo</h4><p className="text-xs text-slate-400">Pago directo</p></div>
                         </button>
-                        <button onClick={() => handlePayment('tarjeta')} className="flex items-center gap-4 p-4 rounded-2xl border-2 border-slate-100 hover:border-blue-500 hover:bg-blue-50 transition-all group">
+                        <button disabled={!isCashOpen} onClick={() => handlePayment('tarjeta')} className="flex items-center gap-4 p-4 rounded-2xl border-2 border-slate-100 hover:border-blue-500 hover:bg-blue-50 transition-all group disabled:opacity-50">
                             <div className="w-12 h-12 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center group-hover:scale-110 transition-transform"><CreditCard size={24}/></div>
                             <div className="text-left"><h4 className="font-bold text-slate-800">Tarjeta</h4><p className="text-xs text-slate-400">Visa / Mastercard</p></div>
                         </button>
-                        <button onClick={() => handlePayment('yape')} className="flex items-center gap-4 p-4 rounded-2xl border-2 border-slate-100 hover:border-purple-500 hover:bg-purple-50 transition-all group">
+                        <button disabled={!isCashOpen} onClick={() => handlePayment('yape')} className="flex items-center gap-4 p-4 rounded-2xl border-2 border-slate-100 hover:border-purple-500 hover:bg-purple-50 transition-all group disabled:opacity-50">
                             <div className="w-12 h-12 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center group-hover:scale-110 transition-transform"><Smartphone size={24}/></div>
                             <div className="text-left"><h4 className="font-bold text-slate-800">Yape / Plin</h4><p className="text-xs text-slate-400">QR Digital</p></div>
                         </button>
@@ -442,14 +466,26 @@ const OrderModal = ({ isOpen, onClose, table }) => {
                             {order.length > 0 ? (
                                 <>
                                     <button type="button" onClick={onClose} className="py-3 rounded-xl font-bold text-slate-500 bg-white border border-slate-200 hover:bg-slate-100">Volver</button>
-                                    <button type="button" disabled={sendingOrder} onClick={handleSendOrder} className="py-3 rounded-xl font-bold text-white bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-200 flex items-center justify-center gap-2 disabled:opacity-50">
+                                    {/* BOTÓN ENVIAR BLOQUEADO SI CAJA CERRADA */}
+                                    <button 
+                                        type="button" 
+                                        disabled={sendingOrder || !isCashOpen} 
+                                        onClick={handleSendOrder} 
+                                        className="py-3 rounded-xl font-bold text-white bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-200 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-slate-300"
+                                    >
                                         {sendingOrder ? <Loader2 className="animate-spin" /> : <ChefHat size={18}/>} Enviar Pedido
                                     </button>
                                 </>
                             ) : (
                                 <>
                                     <button type="button" onClick={onClose} className="py-3 rounded-xl font-bold text-slate-500 bg-white border border-slate-200 hover:bg-slate-100">Cerrar</button>
-                                    <button type="button" disabled={savedOrder.length === 0} onClick={() => setShowPayment(true)} className="py-3 rounded-xl font-bold text-white bg-slate-900 hover:bg-slate-800 shadow-lg flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                                    {/* BOTÓN COBRAR BLOQUEADO SI CAJA CERRADA */}
+                                    <button 
+                                        type="button" 
+                                        disabled={savedOrder.length === 0 || !isCashOpen} 
+                                        onClick={() => setShowPayment(true)} 
+                                        className="py-3 rounded-xl font-bold text-white bg-slate-900 hover:bg-slate-800 shadow-lg flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-slate-300"
+                                    >
                                         <Banknote size={18}/> Cobrar Mesa
                                     </button>
                                 </>
