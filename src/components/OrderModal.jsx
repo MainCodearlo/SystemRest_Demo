@@ -206,62 +206,50 @@ const OrderModal = ({ isOpen, onClose, table }) => {
     }
   };
 
-  // --- LÓGICA DE ENVÍO Y DESCUENTO DE STOCK ---
+  // --- LÓGICA DE ENVÍO OPTIMIZADA (RPC - SEGURA Y ATÓMICA) ---
   const handleSendOrder = async () => {
+    // 1. Validaciones básicas frontend
     if (!isCashOpen) return alert("¡Caja Cerrada! Abre la caja para comandar.");
     if (order.length === 0) return;
     
     setSendingOrder(true);
     try {
-      // 1. Verificar stock antes de procesar (Doble seguridad)
-      for (const item of order) {
-        const { data: prod } = await supabase.from('productos').select('stock').eq('id', item.id).single();
-        // --- CORRECCIÓN AQUÍ: Se eliminó el "QH" que causaba el error ---
-        if (!prod || prod.stock < item.quantity) {
-          throw new Error(`Stock insuficiente para: ${item.name}. Disponible: ${prod?.stock || 0}`);
-        }
-      }
-
       const { data: { user } } = await supabase.auth.getUser();
-      const newOrderTotal = order.reduce((acc, item) => acc + (item.price * item.quantity), 0);
-      let orderId = null;
 
-      if (table.current_order_id) {
-          orderId = table.current_order_id;
-          const { data: currentOrderData } = await supabase.from('ordenes').select('total').eq('id', orderId).single();
-          const previousTotal = currentOrderData ? parseFloat(currentOrderData.total) : 0;
-          await supabase.from('ordenes').update({ total: previousTotal + newOrderTotal }).eq('id', orderId);
-      } else {
-          const { data: newOrder, error: createError } = await supabase.from('ordenes').insert([{ mesa_id: table.id, total: newOrderTotal, estado: 'cocinando', user_id: user?.id }]).select().single();
-          if (createError) throw createError;
-          orderId = newOrder.id;
-      }
-
-      // 2. Insertar Items de Orden
-      const orderItems = order.map(item => ({
-        orden_id: orderId, producto_id: item.id, nombre_producto: item.name, cantidad: item.quantity, precio_unitario: item.price, subtotal: item.price * item.quantity
+      // Preparamos los datos para enviar a la RPC
+      // Mapeamos 'order' para que coincida con el JSON que espera SQL
+      const itemsPayload = order.map(item => ({
+        id: item.id,
+        name: item.name,
+        price: item.price,
+        quantity: item.quantity
       }));
-      const { error: itemsError } = await supabase.from('orden_items').insert(orderItems);
-      if (itemsError) throw itemsError;
 
-      // 3. DESCONTAR STOCK
-      for (const item of order) {
-         // Buscamos el stock actual
-         const { data: curr } = await supabase.from('productos').select('stock').eq('id', item.id).single();
-         // Lo actualizamos
-         await supabase.from('productos').update({ stock: curr.stock - item.quantity }).eq('id', item.id);
-      }
+      // Llamamos a la función segura en base de datos
+      const { data: newOrderId, error } = await supabase.rpc('procesar_comanda', {
+        p_mesa_id: table.id,
+        p_user_id: user?.id || null, // Manejo seguro si no hay usuario
+        p_items: itemsPayload,
+        p_orden_id: table.current_order_id || null // Null si es mesa nueva, ID si ya existe
+      });
 
-      const currentTableTotal = parseFloat(table.total || 0);
-      const finalTableTotal = currentTableTotal + newOrderTotal;
+      if (error) throw error;
 
-      await supabase.from('mesas').update({ status: 'ocupada', total: finalTableTotal, current_order_id: orderId, time_opened: table.time_opened || new Date().toISOString() }).eq('id', table.id);
-
+      // Imprimir Ticket (tu función existente)
       const waiterName = user?.email?.split('@')[0] || "Mesero";
       printOrderTicket(table.name, order, waiterName);
-      onClose();
+      
+      onClose(); // Cerrar modal
+      alert("¡Pedido enviado correctamente!");
+
     } catch (error) {
-      alert("Error: " + error.message);
+      console.error("Error en comanda:", error);
+      // Mensaje amigable si es error de stock (viene desde el RAISE EXCEPTION de SQL)
+      if (error.message && error.message.includes("Stock insuficiente")) {
+         alert("⚠️ Error: " + error.message);
+      } else {
+         alert("Ocurrió un error al procesar el pedido: " + (error.message || "Error desconocido"));
+      }
     } finally {
       setSendingOrder(false);
     }
