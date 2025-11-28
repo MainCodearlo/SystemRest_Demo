@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Search, Plus, Minus, Trash2, ChefHat, ShoppingBag, UtensilsCrossed, Coffee, Beer, IceCream, Loader2, Lock, CheckCircle2, ChevronRight, CreditCard, Banknote, Smartphone, ArrowLeft, AlertTriangle } from 'lucide-react';
+import { X, Search, Plus, Minus, Trash2, ChefHat, ShoppingBag, UtensilsCrossed, Beer, IceCream, Loader2, Lock, CheckCircle2, ChevronRight, CreditCard, Banknote, Smartphone, ArrowLeft, AlertTriangle } from 'lucide-react';
 import { supabase } from '../supabase/client';
 
 const categoryIcons = {
@@ -95,9 +95,7 @@ const OrderModal = ({ isOpen, onClose, table }) => {
   const [sendingOrder, setSendingOrder] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
 
-  // --- NUEVO ESTADO: CAJA ABIERTA ---
   const [isCashOpen, setIsCashOpen] = useState(false); 
-  // ----------------------------------
 
   const scrollContainerRef = useRef(null);
 
@@ -111,7 +109,7 @@ const OrderModal = ({ isOpen, onClose, table }) => {
       setSelectedCategory('todos');
       
       fetchInitialData(); 
-      checkCashStatus(); // <--- VERIFICAR CAJA AL ABRIR
+      checkCashStatus(); 
 
       setProducts([]);
       setPage(0);
@@ -132,7 +130,6 @@ const OrderModal = ({ isOpen, onClose, table }) => {
     return () => clearTimeout(timeoutId);
   }, [selectedCategory, search]);
 
-  // --- VERIFICAR ESTADO DE CAJA ---
   const checkCashStatus = async () => {
     const { data } = await supabase
         .from('caja_sesiones')
@@ -140,7 +137,7 @@ const OrderModal = ({ isOpen, onClose, table }) => {
         .eq('estado', 'abierta')
         .maybeSingle();
     
-    setIsCashOpen(!!data); // True si hay caja abierta, False si no
+    setIsCashOpen(!!data); 
   };
 
   const fetchInitialData = async () => {
@@ -164,7 +161,8 @@ const OrderModal = ({ isOpen, onClose, table }) => {
     const from = pageNumber * PRODUCTS_PER_PAGE;
     const to = from + PRODUCTS_PER_PAGE - 1;
 
-    let query = supabase.from('productos').select('*').range(from, to); 
+    // AQUI FILTRAMOS SOLO LOS QUE TIENEN STOCK > 0
+    let query = supabase.from('productos').select('*').range(from, to).gt('stock', 0);
 
     if (categoryId !== 'todos') query = query.eq('category_id', categoryId);
     if (searchTerm) query = query.ilike('name', `%${searchTerm}%`); 
@@ -192,7 +190,6 @@ const OrderModal = ({ isOpen, onClose, table }) => {
   };
 
   const handlePayment = async (method) => {
-    // DOBLE PROTECCIÓN
     if (!isCashOpen) return alert("¡Caja Cerrada! No se puede cobrar.");
 
     if (!confirm(`¿Confirmar pago de S/${grandTotal.toFixed(2)} con ${method.toUpperCase()}?`)) return;
@@ -209,13 +206,22 @@ const OrderModal = ({ isOpen, onClose, table }) => {
     }
   };
 
+  // --- LÓGICA DE ENVÍO Y DESCUENTO DE STOCK ---
   const handleSendOrder = async () => {
-    // DOBLE PROTECCIÓN
     if (!isCashOpen) return alert("¡Caja Cerrada! Abre la caja para comandar.");
-
     if (order.length === 0) return;
+    
     setSendingOrder(true);
     try {
+      // 1. Verificar stock antes de procesar (Doble seguridad)
+      for (const item of order) {
+        const { data: prod } = await supabase.from('productos').select('stock').eq('id', item.id).single();
+        // --- CORRECCIÓN AQUÍ: Se eliminó el "QH" que causaba el error ---
+        if (!prod || prod.stock < item.quantity) {
+          throw new Error(`Stock insuficiente para: ${item.name}. Disponible: ${prod?.stock || 0}`);
+        }
+      }
+
       const { data: { user } } = await supabase.auth.getUser();
       const newOrderTotal = order.reduce((acc, item) => acc + (item.price * item.quantity), 0);
       let orderId = null;
@@ -231,12 +237,20 @@ const OrderModal = ({ isOpen, onClose, table }) => {
           orderId = newOrder.id;
       }
 
+      // 2. Insertar Items de Orden
       const orderItems = order.map(item => ({
         orden_id: orderId, producto_id: item.id, nombre_producto: item.name, cantidad: item.quantity, precio_unitario: item.price, subtotal: item.price * item.quantity
       }));
-
       const { error: itemsError } = await supabase.from('orden_items').insert(orderItems);
       if (itemsError) throw itemsError;
+
+      // 3. DESCONTAR STOCK
+      for (const item of order) {
+         // Buscamos el stock actual
+         const { data: curr } = await supabase.from('productos').select('stock').eq('id', item.id).single();
+         // Lo actualizamos
+         await supabase.from('productos').update({ stock: curr.stock - item.quantity }).eq('id', item.id);
+      }
 
       const currentTableTotal = parseFloat(table.total || 0);
       const finalTableTotal = currentTableTotal + newOrderTotal;
@@ -247,13 +261,20 @@ const OrderModal = ({ isOpen, onClose, table }) => {
       printOrderTicket(table.name, order, waiterName);
       onClose();
     } catch (error) {
-      alert("Error al guardar pedido: " + error.message);
+      alert("Error: " + error.message);
     } finally {
       setSendingOrder(false);
     }
   };
 
   const addToOrder = (product) => {
+    // Validar stock visualmente al agregar
+    const currentQtyInOrder = order.find(i => i.id === product.id)?.quantity || 0;
+    if (currentQtyInOrder + 1 > product.stock) {
+        alert("No puedes agregar más de lo que hay en stock.");
+        return;
+    }
+
     const existing = order.find(item => item.id === product.id);
     if (existing) {
       setOrder(order.map(item => item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item));
@@ -339,7 +360,11 @@ const OrderModal = ({ isOpen, onClose, table }) => {
                     return (
                         <div key={product.id} onClick={() => addToOrder(product)} className={`flex items-center gap-3 bg-white p-3 rounded-xl border transition-all shadow-sm cursor-pointer select-none active:scale-[0.98] ${qty > 0 ? 'border-blue-500 ring-1 ring-blue-500 bg-blue-50/30' : 'border-slate-200'}`}>
                             <div className="w-16 h-16 shrink-0 rounded-lg overflow-hidden bg-slate-100"><ProductAvatar src={product.image_url} name={product.name} /></div>
-                            <div className="flex-1 min-w-0"><h3 className="font-bold text-slate-800 text-sm truncate">{product.name}</h3><p className="text-xs text-slate-500">S/{product.price}</p></div>
+                            <div className="flex-1 min-w-0">
+                                <h3 className="font-bold text-slate-800 text-sm truncate">{product.name}</h3>
+                                <p className="text-xs text-slate-500">S/{product.price}</p>
+                                <p className="text-[10px] text-slate-400 mt-1">Stock: {product.stock}</p>
+                            </div>
                             <div className="flex items-center" onClick={(e) => e.stopPropagation()}>
                                 {qty === 0 ? (
                                     <button type="button" onClick={() => addToOrder(product)} className="w-9 h-9 rounded-full bg-slate-100 text-blue-600 flex items-center justify-center hover:bg-blue-600 hover:text-white transition-colors"><Plus size={18} /></button>
@@ -385,11 +410,9 @@ const OrderModal = ({ isOpen, onClose, table }) => {
                     CAJA CERRADA - Solo lectura
                 </div>
             )}
-            {/* -------------------------- */}
 
             {showPayment ? (
                 <div className="flex flex-col h-full relative">
-                    {/* BLOQUEO DE PANTALLA PAGO SI CAJA ESTÁ CERRADA */}
                     {!isCashOpen && <div className="absolute inset-0 bg-white/80 z-50 flex items-center justify-center font-bold text-slate-500">Función deshabilitada</div>}
 
                     <div className="p-5 border-b border-slate-100 flex items-center gap-3">
@@ -466,7 +489,6 @@ const OrderModal = ({ isOpen, onClose, table }) => {
                             {order.length > 0 ? (
                                 <>
                                     <button type="button" onClick={onClose} className="py-3 rounded-xl font-bold text-slate-500 bg-white border border-slate-200 hover:bg-slate-100">Volver</button>
-                                    {/* BOTÓN ENVIAR BLOQUEADO SI CAJA CERRADA */}
                                     <button 
                                         type="button" 
                                         disabled={sendingOrder || !isCashOpen} 
@@ -479,7 +501,6 @@ const OrderModal = ({ isOpen, onClose, table }) => {
                             ) : (
                                 <>
                                     <button type="button" onClick={onClose} className="py-3 rounded-xl font-bold text-slate-500 bg-white border border-slate-200 hover:bg-slate-100">Cerrar</button>
-                                    {/* BOTÓN COBRAR BLOQUEADO SI CAJA CERRADA */}
                                     <button 
                                         type="button" 
                                         disabled={savedOrder.length === 0 || !isCashOpen} 
