@@ -1,22 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import Header from '../components/Header';
 import { supabase } from '../supabase/client';
+import { printOrderUSB } from '../utils/printService'; // <--- IMPORTANTE: Importamos el servicio
 import { 
-  DollarSign, CreditCard, Smartphone, Calendar, TrendingUp, Loader2, 
-  Lock, Unlock, PlusCircle, MinusCircle, Save, AlertTriangle, Printer 
+  DollarSign, CreditCard, Smartphone, TrendingUp, Loader2, 
+  Lock, Unlock, PlusCircle, MinusCircle, AlertTriangle, Printer,
+  Trash2, ShieldAlert, Eye, FileText, X // <--- Iconos nuevos
 } from 'lucide-react';
 
-// --- FUNCIÓN DE IMPRESIÓN DE REPORTE DETALLADO ---
+// --- FUNCIÓN DE IMPRESIÓN DE REPORTE DE CIERRE (Mantenemos esta igual) ---
 const printSessionReport = (totals, cashExpected, realCount, diff, salesDetail, userEmail = "Administrador") => {
   const now = new Date();
   const dateStr = now.toLocaleDateString('es-PE');
   const timeStr = now.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
 
-  // Generamos el HTML de cada venta individual
   const salesRows = salesDetail.map(sale => {
     const timeSale = new Date(sale.created_at).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
-    
-    // Lista de productos de esta mesa
     const itemsHtml = sale.orden_items.map(item => `
         <div style="display: flex; justify-content: space-between; padding-left: 10px; color: #555;">
             <span>${item.cantidad} x ${item.nombre_producto}</span>
@@ -33,14 +32,8 @@ const printSessionReport = (totals, cashExpected, realCount, diff, salesDetail, 
         <div style="font-size: 10px; color: #333; margin-bottom: 2px;">
             Ticket #${sale.id.toString().slice(0,8)} - ${sale.metodo_pago.toUpperCase()}
         </div>
-        
-        <div style="font-size: 10px; margin-bottom: 4px;">
-            ${itemsHtml}
-        </div>
-
-        <div style="text-align: right; font-weight: bold;">
-            Total: S/${parseFloat(sale.total).toFixed(2)}
-        </div>
+        <div style="font-size: 10px; margin-bottom: 4px;">${itemsHtml}</div>
+        <div style="text-align: right; font-weight: bold;">Total: S/${parseFloat(sale.total).toFixed(2)}</div>
       </div>
     `;
   }).join('');
@@ -65,40 +58,21 @@ const printSessionReport = (totals, cashExpected, realCount, diff, salesDetail, 
           <div>Fecha: ${dateStr} - Hora: ${timeStr}</div>
           <div>Cajero: ${userEmail}</div>
         </div>
-
         <span class="subtitle">RESUMEN FINANCIERO</span>
         <div class="row"><span>Ventas Totales:</span> <span>S/${totals.totalVentas.toFixed(2)}</span></div>
-        
-        <span class="subtitle">DESGLOSE POR PAGO</span>
         <div class="row"><span>Efectivo:</span> <span>S/${totals.efectivo.toFixed(2)}</span></div>
         <div class="row"><span>Tarjeta:</span> <span>S/${totals.tarjeta.toFixed(2)}</span></div>
         <div class="row"><span>Yape / Plin:</span> <span>S/${totals.yape.toFixed(2)}</span></div>
-
         <span class="subtitle">ARQUEO DE EFECTIVO</span>
         <div class="row"><span>Base Inicial:</span> <span>S/${(totals.inicio || 0).toFixed(2)}</span></div>
         <div class="row"><span>(+) Ventas Efec.:</span> <span>S/${totals.efectivo.toFixed(2)}</span></div>
         <div class="row"><span>(+) Ingresos:</span> <span>S/${totals.ingresos.toFixed(2)}</span></div>
         <div class="row"><span>(-) Gastos:</span> <span>S/${totals.egresos.toFixed(2)}</span></div>
-        
-        <div class="total-row">
-            <span>SISTEMA (TEÓRICO):</span> 
-            <span>S/${cashExpected.toFixed(2)}</span>
-        </div>
-        
-        ${realCount !== null ? `
-        <div class="row" style="margin-top:5px;"><span>CONTEO REAL:</span> <span>S/${parseFloat(realCount).toFixed(2)}</span></div>
-        <div class="row"><span>DIFERENCIA:</span> <span>S/${parseFloat(diff).toFixed(2)}</span></div>
-        ` : ''}
-
+        <div class="total-row"><span>SISTEMA (TEÓRICO):</span> <span>S/${cashExpected.toFixed(2)}</span></div>
+        ${realCount !== null ? `<div class="row" style="margin-top:5px;"><span>CONTEO REAL:</span> <span>S/${parseFloat(realCount).toFixed(2)}</span></div><div class="row"><span>DIFERENCIA:</span> <span>S/${parseFloat(diff).toFixed(2)}</span></div>` : ''}
         <span class="subtitle">DETALLE DE VENTAS</span>
-        <div style="font-size: 11px;">
-            ${salesRows}
-        </div>
-
-        <div class="footer">
-          __________________________<br/>
-          Firma del Responsable
-        </div>
+        <div style="font-size: 11px;">${salesRows}</div>
+        <div class="footer">__________________________<br/>Firma del Responsable</div>
       </body>
     </html>
   `;
@@ -109,19 +83,16 @@ const printSessionReport = (totals, cashExpected, realCount, diff, salesDetail, 
   iframe.style.height = '0px';
   iframe.style.border = 'none';
   document.body.appendChild(iframe);
-
   const doc = iframe.contentWindow.document;
   doc.open();
   doc.write(ticketContent);
   doc.close();
-
   iframe.contentWindow.focus();
   setTimeout(() => {
     iframe.contentWindow.print();
     setTimeout(() => document.body.removeChild(iframe), 1000);
   }, 500);
 };
-// ---------------------------------------------------------------
 
 const Caja = () => {
   const [loading, setLoading] = useState(true);
@@ -131,18 +102,23 @@ const Caja = () => {
   const [manualMovements, setManualMovements] = useState([]);
   
   const [totals, setTotals] = useState({ 
-      efectivo: 0, 
-      tarjeta: 0, 
-      yape: 0, 
-      totalVentas: 0, 
-      ingresos: 0, 
-      egresos: 0,
-      inicio: 0
+      efectivo: 0, tarjeta: 0, yape: 0, totalVentas: 0, 
+      ingresos: 0, egresos: 0, inicio: 0
   });
 
   const [showOpenModal, setShowOpenModal] = useState(false);
   const [showMoveModal, setShowMoveModal] = useState(false);
   const [showCloseModal, setShowCloseModal] = useState(false);
+  
+  // --- ESTADOS PARA ANULACIÓN ---
+  const [showVoidModal, setShowVoidModal] = useState(false);
+  const [ticketToVoid, setTicketToVoid] = useState(null);
+  const [adminPin, setAdminPin] = useState('');
+  const [voidLoading, setVoidLoading] = useState(false);
+
+  // --- ESTADOS PARA DETALLE DE TICKET ---
+  const [showDetailModal, setShowDetailModal] = useState(false);
+  const [ticketDetail, setTicketDetail] = useState(null);
 
   const [initialAmount, setInitialAmount] = useState('');
   const [moveForm, setMoveForm] = useState({ type: 'ingreso', amount: '', description: '' });
@@ -177,16 +153,11 @@ const Caja = () => {
   const fetchSessionData = async (sessionId) => {
     const { data: sessionInfo } = await supabase.from('caja_sesiones').select('created_at, monto_inicial').eq('id', sessionId).single();
     
-    // --- AQUÍ ESTÁ LA MAGIA: Ahora traemos también 'orden_items' ---
     const { data: sales } = await supabase
       .from('ordenes')
       .select(`
-        id, 
-        created_at, 
-        total, 
-        metodo_pago, 
-        mesas(name),
-        orden_items ( nombre_producto, cantidad, precio_unitario ) 
+        id, created_at, total, metodo_pago, mesas(name),
+        orden_items ( producto_id, nombre_producto, cantidad, precio_unitario ) 
       `)
       .eq('estado', 'pagado')
       .gte('created_at', sessionInfo.created_at) 
@@ -224,6 +195,79 @@ const Caja = () => {
     });
 
     setTotals(t);
+  };
+
+  // --- LÓGICA DE REIMPRESIÓN ---
+  const handleReprint = async (ticket) => {
+    if (!confirm("¿Deseas reimprimir este ticket?")) return;
+    
+    // Formatear items para el servicio de impresión
+    const itemsFormatted = ticket.orden_items.map(item => ({
+        name: item.nombre_producto,
+        quantity: item.cantidad,
+        price: item.precio_unitario
+    }));
+
+    await printOrderUSB(
+        ticket.mesas?.name || "Mesa",
+        itemsFormatted,
+        "Copia Reimpresa",
+        "COPIA DE TICKET"
+    );
+  };
+
+  // --- LÓGICA DE VER DETALLE ---
+  const openDetailModal = (ticket) => {
+      setTicketDetail(ticket);
+      setShowDetailModal(true);
+  };
+
+  // --- LÓGICA DE ANULACIÓN DE VENTA ---
+  const handleVoidSale = async () => {
+    if (adminPin !== '1234') { 
+        alert("PIN Incorrecto");
+        return;
+    }
+
+    if (!ticketToVoid) return;
+    setVoidLoading(true);
+
+    try {
+        // Devolver stock
+        for (const item of ticketToVoid.orden_items) {
+            if (item.producto_id) {
+                const { data: prod } = await supabase.from('productos').select('stock').eq('id', item.producto_id).single();
+                if (prod) {
+                    await supabase.from('productos').update({ stock: prod.stock + item.cantidad }).eq('id', item.producto_id);
+                }
+            }
+        }
+
+        const { error } = await supabase
+            .from('ordenes')
+            .update({ estado: 'anulado' })
+            .eq('id', ticketToVoid.id);
+
+        if (error) throw error;
+
+        alert(`Ticket anulado correctamente.`);
+        setShowVoidModal(false);
+        setTicketToVoid(null);
+        setAdminPin('');
+        fetchSessionData(session.id);
+
+    } catch (error) {
+        console.error("Error anulando:", error);
+        alert("Error al anular: " + error.message);
+    } finally {
+        setVoidLoading(false);
+    }
+  };
+
+  const openVoidModal = (ticket) => {
+      setTicketToVoid(ticket);
+      setAdminPin('');
+      setShowVoidModal(true);
   };
 
   const handleOpenSession = async () => {
@@ -266,7 +310,6 @@ const Caja = () => {
 
   const handleCloseSession = async () => {
     if (!closeAmount) return alert("Ingresa el monto real contado");
-    
     const efectivoSistema = totals.inicio + totals.efectivo + totals.ingresos - totals.egresos;
     const real = parseFloat(closeAmount);
     const diferencia = real - efectivoSistema;
@@ -284,9 +327,7 @@ const Caja = () => {
 
     if (error) alert("Error al cerrar caja");
     else {
-        // PASAMOS LOS MOVIMIENTOS (VENTAS CON DETALLE) AL REPORTE
         printSessionReport(totals, efectivoSistema, real, diferencia, movements);
-        
         alert("Caja Cerrada Correctamente");
         setShowCloseModal(false);
         setCloseAmount('');
@@ -358,18 +399,39 @@ const Caja = () => {
             <div className="overflow-x-auto max-h-[500px]">
               <table className="w-full text-left text-sm">
                 <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
-                  <tr><th className="p-4">Hora</th><th className="p-4">Mesa</th><th className="p-4">Método</th><th className="p-4 text-right">Monto</th></tr>
+                  <tr>
+                      <th className="p-4">Hora</th>
+                      <th className="p-4">Mesa</th>
+                      <th className="p-4">Método</th>
+                      <th className="p-4 text-right">Monto</th>
+                      <th className="p-4 text-center">Acciones</th> {/* Columna unificada */}
+                  </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {movements.map((mov) => (
-                    <tr key={mov.id} className="hover:bg-slate-50">
+                    <tr key={mov.id} className="hover:bg-slate-50 group">
                       <td className="p-4 font-mono text-slate-500">{new Date(mov.created_at).toLocaleTimeString('es-PE', {hour: '2-digit', minute:'2-digit'})}</td>
                       <td className="p-4 font-bold text-slate-700">Mesa {mov.mesas?.name}</td>
                       <td className="p-4"><span className={`px-2 py-1 rounded text-xs font-bold uppercase ${mov.metodo_pago === 'efectivo' ? 'bg-green-100 text-green-700' : mov.metodo_pago === 'tarjeta' ? 'bg-indigo-100 text-indigo-700' : 'bg-purple-100 text-purple-700'}`}>{mov.metodo_pago}</span></td>
                       <td className="p-4 text-right font-bold">S/{parseFloat(mov.total).toFixed(2)}</td>
+                      
+                      {/* --- NUEVAS ACCIONES --- */}
+                      <td className="p-4 text-center">
+                          <div className="flex justify-center gap-1 opacity-50 group-hover:opacity-100 transition-opacity">
+                              <button onClick={() => openDetailModal(mov)} className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100" title="Ver Detalle">
+                                  <Eye size={16}/>
+                              </button>
+                              <button onClick={() => handleReprint(mov)} className="p-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200" title="Reimprimir">
+                                  <Printer size={16}/>
+                              </button>
+                              <button onClick={() => openVoidModal(mov)} className="p-2 bg-red-50 text-red-500 rounded-lg hover:bg-red-100" title="Anular Venta">
+                                  <Trash2 size={16}/>
+                              </button>
+                          </div>
+                      </td>
                     </tr>
                   ))}
-                  {movements.length === 0 && <tr><td colSpan="4" className="p-8 text-center text-slate-400">Sin ventas aún.</td></tr>}
+                  {movements.length === 0 && <tr><td colSpan="5" className="p-8 text-center text-slate-400">Sin ventas aún.</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -394,6 +456,7 @@ const Caja = () => {
           </div>
       </div>
 
+      {/* MODAL MOVIMIENTO MANUAL */}
       {showMoveModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm">
             <div className="bg-white p-6 rounded-3xl shadow-2xl w-96">
@@ -411,59 +474,130 @@ const Caja = () => {
         </div>
       )}
 
+      {/* MODAL DE CIERRE DE CAJA */}
       {showCloseModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm">
             <div className="bg-white p-8 rounded-3xl shadow-2xl w-full max-w-md relative">
-                {/* BOTÓN FLOTANTE IMPRIMIR PRE-REPORTE */}
-                <button 
-                    onClick={() => printSessionReport(totals, efectivoEnCaja, null, 0, movements)}
-                    className="absolute top-6 right-6 p-2 bg-slate-100 rounded-full hover:bg-slate-200 text-slate-600 transition-colors"
-                    title="Imprimir Pre-Cierre"
-                >
-                    <Printer size={20} />
-                </button>
-
+                <button onClick={() => printSessionReport(totals, efectivoEnCaja, null, 0, movements)} className="absolute top-6 right-6 p-2 bg-slate-100 rounded-full hover:bg-slate-200 text-slate-600 transition-colors" title="Imprimir Pre-Cierre"><Printer size={20} /></button>
                 <div className="text-center mb-6">
                     <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-3"><Lock size={32} className="text-slate-600"/></div>
                     <h3 className="text-2xl font-bold text-slate-800">Cierre de Caja</h3>
                     <p className="text-slate-500 text-sm">Resumen del turno y arqueo de efectivo.</p>
                 </div>
-                
                 <div className="mb-4 p-3 bg-indigo-50 rounded-xl border border-indigo-100 flex justify-between items-center">
                     <span className="text-indigo-800 font-bold text-sm">Venta Total del Turno:</span>
                     <span className="text-indigo-900 font-bold text-xl">S/{totals.totalVentas.toFixed(2)}</span>
                 </div>
-
                 <div className="bg-blue-50 p-4 rounded-xl mb-6 border border-blue-100 text-sm">
-                    <div className="flex justify-between mb-2 font-bold text-slate-700 pb-2 border-b border-blue-200">
-                        <span>DETALLE DE COBROS:</span>
-                    </div>
+                    <div className="flex justify-between mb-2 font-bold text-slate-700 pb-2 border-b border-blue-200"><span>DETALLE DE COBROS:</span></div>
                     <div className="flex justify-between mb-1 text-slate-600"><span>• Efectivo:</span> <span>S/{totals.efectivo.toFixed(2)}</span></div>
                     <div className="flex justify-between mb-1 text-slate-600"><span>• Tarjeta:</span> <span>S/{totals.tarjeta.toFixed(2)}</span></div>
                     <div className="flex justify-between mb-3 text-slate-600"><span>• Yape / Plin:</span> <span>S/{totals.yape.toFixed(2)}</span></div>
-                    
-                    <div className="flex justify-between mb-2 font-bold text-slate-700 pb-2 border-b border-blue-200 border-t border-blue-200 pt-2">
-                        <span>ARQUEO DE EFECTIVO:</span>
-                    </div>
+                    <div className="flex justify-between mb-2 font-bold text-slate-700 pb-2 border-b border-blue-200 border-t border-blue-200 pt-2"><span>ARQUEO DE EFECTIVO:</span></div>
                     <div className="flex justify-between mb-1 text-slate-600"><span>Base Inicial:</span> <span>S/{(totals.inicio || 0).toFixed(2)}</span></div>
                     <div className="flex justify-between mb-1 text-slate-600"><span>(+) Ventas Efectivo:</span> <span>S/{totals.efectivo.toFixed(2)}</span></div>
                     <div className="flex justify-between mb-1 text-slate-600"><span>(+) Ingresos Manuales:</span> <span>S/{totals.ingresos.toFixed(2)}</span></div>
                     <div className="flex justify-between mb-3 text-slate-600"><span>(-) Gastos:</span> <span>S/{totals.egresos.toFixed(2)}</span></div>
-                    
-                    <div className="flex justify-between pt-3 border-t border-blue-200 font-bold text-slate-900 text-lg bg-blue-100/50 p-2 rounded-lg -mx-2">
-                        <span>Debe haber en Caja:</span> <span>S/{efectivoEnCaja.toFixed(2)}</span>
-                    </div>
+                    <div className="flex justify-between pt-3 border-t border-blue-200 font-bold text-slate-900 text-lg bg-blue-100/50 p-2 rounded-lg -mx-2"><span>Debe haber en Caja:</span> <span>S/{efectivoEnCaja.toFixed(2)}</span></div>
                 </div>
-
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Dinero Real (Lo que contaste)</label>
                 <div className="relative mb-8">
                     <DollarSign className="absolute left-4 top-3.5 text-slate-400" size={20}/>
                     <input type="number" autoFocus value={closeAmount} onChange={e => setCloseAmount(e.target.value)} className="w-full pl-12 pr-4 py-3 bg-slate-50 rounded-xl border border-slate-200 font-bold text-xl outline-blue-500" placeholder="0.00" />
                 </div>
-
                 <div className="flex gap-3">
                     <button onClick={() => setShowCloseModal(false)} className="flex-1 py-3 font-bold text-slate-500 hover:bg-slate-50 rounded-xl">Cancelar</button>
                     <button onClick={handleCloseSession} className="flex-1 py-3 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800 shadow-lg">Confirmar Cierre</button>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* MODAL DE ANULACIÓN */}
+      {showVoidModal && ticketToVoid && (
+        <div className="fixed inset-0 bg-red-900/40 flex items-center justify-center z-[60] backdrop-blur-sm">
+            <div className="bg-white p-8 rounded-3xl shadow-2xl w-full max-w-sm animate-in fade-in zoom-in duration-200">
+                <div className="flex flex-col items-center text-center mb-6">
+                    <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
+                        <ShieldAlert size={32} className="text-red-600"/>
+                    </div>
+                    <h3 className="text-xl font-bold text-slate-900">Anulación de Venta</h3>
+                    <p className="text-sm text-slate-500 mt-1">
+                        Estás anulando el ticket <b>#{ticketToVoid.id.toString().slice(0,8)}</b> por 
+                        <span className="font-bold text-slate-800 ml-1">S/{ticketToVoid.total.toFixed(2)}</span>
+                    </p>
+                    <p className="text-xs text-red-500 font-bold mt-2 bg-red-50 px-3 py-1 rounded-full">
+                        ⚠️ Se devolverá el stock automáticamente
+                    </p>
+                </div>
+
+                <div className="mb-6">
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-2">PIN DE ADMINISTRADOR</label>
+                    <div className="relative">
+                        <Lock className="absolute left-4 top-3.5 text-slate-400" size={18}/>
+                        <input 
+                            type="password" 
+                            autoFocus 
+                            maxLength={4}
+                            value={adminPin} 
+                            onChange={e => setAdminPin(e.target.value)} 
+                            className="w-full pl-12 pr-4 py-3 bg-slate-50 rounded-xl border border-slate-200 font-bold text-center text-xl tracking-[0.5em] outline-red-500 text-slate-800" 
+                            placeholder="••••" 
+                        />
+                    </div>
+                    <p className="text-[10px] text-center text-slate-400 mt-2">PIN por defecto: 1234</p>
+                </div>
+
+                <div className="flex gap-3">
+                    <button onClick={() => setShowVoidModal(false)} className="flex-1 py-3 font-bold text-slate-500 hover:bg-slate-50 rounded-xl">Cancelar</button>
+                    <button 
+                        onClick={handleVoidSale} 
+                        disabled={voidLoading || adminPin.length < 4}
+                        className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow-lg shadow-red-200 flex justify-center items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
+                    >
+                        {voidLoading ? <Loader2 className="animate-spin"/> : <Trash2 size={18}/>} 
+                        Confirmar
+                    </button>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* --- NUEVO: MODAL DETALLE DE TICKET --- */}
+      {showDetailModal && ticketDetail && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 relative">
+                <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                    <div>
+                        <h3 className="font-bold text-lg text-slate-800">Detalle de Consumo</h3>
+                        <p className="text-xs text-slate-500">Mesa: {ticketDetail.mesas?.name}</p>
+                    </div>
+                    <button onClick={() => setShowDetailModal(false)} className="p-1 rounded-full hover:bg-slate-200 text-slate-400"><X size={20}/></button>
+                </div>
+                
+                <div className="p-0 max-h-[400px] overflow-y-auto">
+                    {ticketDetail.orden_items.map((item, index) => (
+                        <div key={index} className="flex justify-between items-center p-4 border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                            <div className="flex items-center gap-3">
+                                <span className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 font-bold flex items-center justify-center text-sm">{item.cantidad}</span>
+                                <div>
+                                    <p className="text-sm font-bold text-slate-700">{item.nombre_producto}</p>
+                                    <p className="text-xs text-slate-400">PU: S/{item.precio_unitario}</p>
+                                </div>
+                            </div>
+                            <span className="font-bold text-slate-800 text-sm">S/{(item.cantidad * item.precio_unitario).toFixed(2)}</span>
+                        </div>
+                    ))}
+                </div>
+
+                <div className="p-5 bg-slate-50 border-t border-slate-100">
+                    <div className="flex justify-between items-center mb-4">
+                        <span className="text-sm font-bold text-slate-500">TOTAL PAGADO</span>
+                        <span className="text-2xl font-bold text-slate-900">S/{parseFloat(ticketDetail.total).toFixed(2)}</span>
+                    </div>
+                    <button onClick={() => { setShowDetailModal(false); handleReprint(ticketDetail); }} className="w-full py-3 bg-slate-900 text-white font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-slate-800">
+                        <Printer size={18}/> Reimprimir Ticket
+                    </button>
                 </div>
             </div>
         </div>

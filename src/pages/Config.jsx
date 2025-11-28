@@ -5,6 +5,7 @@ import { Package, LayoutGrid, Printer } from 'lucide-react';
 // Importamos los componentes modulares
 import ProductsTab from '../components/config/ProductsTab';
 import TablesTab from '../components/config/TablesTab';
+import PrintersTab from '../components/config/PrintersTab'; // <--- NUEVO IMPORT
 
 const Config = () => {
   const [activeTab, setActiveTab] = useState('productos');
@@ -42,15 +43,7 @@ const Config = () => {
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 min-h-[500px]">
         {activeTab === 'productos' && <ProductsTab />}
         {activeTab === 'mesas' && <TablesTab />}
-        {activeTab === 'impresoras' && (
-          <div className="p-16 text-center">
-            <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-300">
-                <Printer size={40}/>
-            </div>
-            <h3 className="text-lg font-bold text-slate-500">Configuración de Impresoras</h3>
-            <p className="text-sm text-slate-400">Este módulo se implementará próximamente.</p>
-          </div>
-        )}
+        {activeTab === 'impresoras' && <PrintersTab />} {/* <--- AQUÍ SE RENDERIZA */}
       </div>
     </div>
   );
